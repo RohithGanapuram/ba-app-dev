@@ -54,19 +54,19 @@ NWS_API_BASE = "https://api.weather.gov"
 USER_AGENT = "weather-app/1.0"
 
 #Helper functions
-async def make_nws_request(url: str) -> dict[str, Any] | None:
+def make_nws_request(url: str) -> dict[str, Any] | None:
     """Make a request to the NWS API with proper error handling."""
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "application/geo+json"
     }
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(url, headers=headers, timeout=30.0)
+    try:
+        with httpx.Client() as client:
+            response = client.get(url, headers=headers, timeout=30.0)
             response.raise_for_status()
             return response.json()
-        except Exception:
-            return None
+    except Exception:
+        return None
         
 def format_alert(feature: dict) -> str:
     """Format an alert feature into a readable string."""
@@ -94,6 +94,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PAPER_DIR = os.path.join(BASE_DIR, "papers")
 GENERATED_FILES_DIR = os.path.join(BASE_DIR, "generated_files")
 
+# Ensure directories exist
+os.makedirs(PAPER_DIR, exist_ok=True)
+os.makedirs(GENERATED_FILES_DIR, exist_ok=True)
+
 
 #create an MCP server
 mcp = FastMCP("Research-Demo")
@@ -106,14 +110,14 @@ def sum(a: int, b: int) -> int:
 
 
 @mcp.tool()
-async def get_alerts(state: str) -> str:
+def get_alerts(state: str) -> str:
     """Get weather alerts for a US state.
 
     Args:
         state: Two-letter US state code (e.g. CA, NY)
     """
     url = f"{NWS_API_BASE}/alerts/active/area/{state}"
-    data = await make_nws_request(url)
+    data = make_nws_request(url)
 
     if not data or "features" not in data:
         return "Unable to fetch alerts or no alerts found."
@@ -126,7 +130,7 @@ async def get_alerts(state: str) -> str:
 
 
 @mcp.tool()
-async def get_forecast(latitude: float, longitude: float) -> str:
+def get_forecast(latitude: float, longitude: float) -> str:
     """Get weather forecast for a location.
 
     Args:
@@ -135,14 +139,14 @@ async def get_forecast(latitude: float, longitude: float) -> str:
     """
     # First get the forecast grid endpoint
     points_url = f"{NWS_API_BASE}/points/{latitude},{longitude}"
-    points_data = await make_nws_request(points_url)
+    points_data = make_nws_request(points_url)
 
     if not points_data:
         return "Unable to fetch forecast data for this location."
 
     # Get the forecast URL from the points response
     forecast_url = points_data["properties"]["forecast"]
-    forecast_data = await make_nws_request(forecast_url)
+    forecast_data = make_nws_request(forecast_url)
 
     if not forecast_data:
         return "Unable to fetch detailed forecast."
@@ -520,206 +524,136 @@ def generate_text_file(content: str, filename: str = None, file_extension: str =
             "error": str(e)
         })
 
+@mcp.prompt(title="Step-2: Executive Summary of Procurement Document")
+def Step2_summarize_documents():
+    """Generate a clear, high-value summary of uploaded RFP, RFQ, or RFI documents for executive decision-making."""
+    return f"""
+You are **BroadAxis-AI**, an intelligent assistant that analyzes procurement documents (RFP, RFQ, RFI) to help vendor teams quickly understand the opportunity and make informed pursuit decisions.
+When a user uploads one or more documents, do the following **for each document, one at a time**:
 
-@mcp.tool()
-def list_generated_files() -> str:
-    """
-    List all generated files available for download.
+---
 
-    Returns:
-        JSON string with list of available files
-    """
-    try:
-        files = []
-        if os.path.exists(GENERATED_FILES_DIR):
-            for filename in os.listdir(GENERATED_FILES_DIR):
-                file_path = os.path.join(GENERATED_FILES_DIR, filename)
-                if os.path.isfile(file_path):
-                    file_size = os.path.getsize(file_path)
-                    file_modified = datetime.datetime.fromtimestamp(os.path.getmtime(file_path))
+### 📄 Document: [Document Name]
 
-                    files.append({
-                        "filename": filename,
-                        "file_size": file_size,
-                        "download_url": f"/download/{filename}",
-                        "modified_at": file_modified.isoformat(),
-                        "type": filename.split('.')[-1] if '.' in filename else "unknown"
-                    })
+#### 🔹 What is This About?
+> A 3–5 sentence **plain-English overview** of the opportunity. Include:
+- Who issued it (organization)
+- What they need / are requesting
+- Why (the business problem or goal)
+- Type of response expected (proposal, quote, info)
 
-        return json.dumps({
-            "status": "success",
-            "files": files,
-            "count": len(files)
-        })
+---
 
-    except Exception as e:
-        return json.dumps({
-            "status": "error",
-            "error": str(e)
-        })
+#### 🧩 Key Opportunity Details
+List all of the following **if available** in the document:
+- **Submission Deadline:** [Date + Time]
+- **Project Start/End Dates:** [Dates or Duration]
+- **Estimated Value / Budget:** [If stated]
+- **Response Format:** (e.g., PDF proposal, online portal, pricing form, etc.)
+- **Delivery Location(s):** [City, Region, Remote, etc.]
+- **Eligibility Requirements:** (Certifications, licenses, location limits)
+- **Scope Summary:** (Bullet points or short paragraph outlining main tasks or deliverables)
 
+---
 
-@mcp.tool()
-def cleanup_old_files(days_old: int = 0) -> str:
-    """
-    Clean up generated files older than specified days.
+#### 📊 Evaluation Criteria
+How will responses be scored or selected? Include weighting if provided (e.g., 40% price, 30% experience).
 
-    Args:
-        days_old: Number of days old files should be to be deleted (default: 7)
+---
 
-    Returns:
-        JSON string with cleanup results
-    """
-    try:
-        deleted_files = []
-        current_time = datetime.datetime.now()
-        cutoff_time = current_time - datetime.timedelta(days=days_old)
+#### ⚠️ Notable Risks or Challenges
+Mention anything that could pose a red flag or require clarification (tight timeline, vague scope, legal constraints, strict eligibility).
 
-        if os.path.exists(GENERATED_FILES_DIR):
-            for filename in os.listdir(GENERATED_FILES_DIR):
-                file_path = os.path.join(GENERATED_FILES_DIR, filename)
-                if os.path.isfile(file_path):
-                    file_modified = datetime.datetime.fromtimestamp(os.path.getmtime(file_path))
-                    if file_modified < cutoff_time:
-                        os.remove(file_path)
-                        deleted_files.append({
-                            "filename": filename,
-                            "modified_at": file_modified.isoformat()
-                        })
+---
 
-        return json.dumps({
-            "status": "success",
-            "deleted_files": deleted_files,
-            "count": len(deleted_files),
-            "cutoff_date": cutoff_time.isoformat()
-        })
+#### 💡 Potential Opportunities or Differentiators
+Highlight anything that could give a competitive edge or present upsell/cross-sell opportunities (e.g., optional services, innovation clauses, incumbent fatigue).
 
-    except Exception as e:
-        return json.dumps({
-            "status": "error",
-            "error": str(e)
-        })
+---
+
+#### 📞 Contact & Submission Info
+- **Primary Contact:** Name, title, email, phone (if listed)
+- **Submission Instructions:** Portal, email, physical, etc.
+
+---
+
+### 🤔 Ready for Action?
+> Would you like a strategic assessment or a **Go/No-Go recommendation** for this opportunity?
+
+⚠️ Only summarize what is clearly and explicitly stated. Never guess or infer.
+"""
 
 
-class FileContent(BaseModel):
-    name: str
-    content: str
+@mcp.prompt(title="Step-3 : Go/No-Go Recommendation")
+def Step3_go_no_go_recommendation() -> str:
+    return """
+You are BroadAxis-AI, an assistant trained to evaluate whether BroadAxis should pursue an RFP, RFQ, or RFI opportunity.
+The user has uploaded one or more opportunity documents. You have already summarized them/if not ask for the user to upload RFP/RFI/RF documents and generate summary.
+Now perform a structured **Go/No-Go analysis** using the following steps:
+---
+### 🧠 Step-by-Step Evaluation Framework
 
+1. **Review the RFP Requirements**
+   - Highlight the most critical needs and evaluation criteria.
 
+2. **Search Internal Knowledge** (via Broadaxis_knowledge_search)
+   - Identify relevant past projects
+   - Retrieve proof of experience in similar domains
+   - Surface known strengths or capability gaps
 
-class FileContent(BaseModel):
-    name: str
-    content: str
+3. **Evaluate Capability Alignment**
+   - Estimate percentage match (e.g., "BroadAxis meets ~85% of the requirements")
+   - Note any missing capabilities or unclear requirements
 
-@mcp.resource("file://desktop/{name}")
-def read_document(name: str) -> FileContent:
-    """Read a document and return its name and content"""
-    safe_name = os.path.basename(name)
-    file_path = os.path.join("C:/Users/rohka/OneDrive/Desktop", safe_name)
-    
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
-    
-    return FileContent(name=safe_name, content=content)
+4. **Assess Resource Requirements**
+   - Are there any specialized skills, timelines, or staffing needs?
+   - Does BroadAxis have the necessary team or partners?
 
+5. **Evaluate Competitive Positioning**
+   - Based on known experience and domain, would BroadAxis be competitive?
 
-#add a dynamic greeting resource
-@mcp.resource("greeting://{name}")
-def get_greeting(name: str) -> str:
-    """Get a personalized greeting"""
-    return f"Hello, {name}!"
+Use only verified internal information (via Broadaxis_knowledge_search) and the uploaded documents.
+Do not guess or hallucinate capabilities. If information is missing, clearly state what else is needed for a confident decision.
+if your recommendation is a Go, list down the things to the user of the tasks he need to complete  to finish the submission of RFP/RFI/RFQ. 
 
-@mcp.resource("config://settings")
-def get_settings() -> str:
-    """Get application settings."""
-    return """{
-    "theme": "dark",
-    "language": "en",
-    "debug": false
-    }"""
+"""
 
-@mcp.resource("config://word_formatting_instructions")
-def get_word_formatting_instructions() -> str:
-    """Get Word document formatting instructions."""
-    return """{
-    "font": "Calibri",
-    "font_size": 11,
-    "heading_font_size": 14,
-    "heading_bold": true,
-    "line_spacing": 1.15,
-    "margins": {
-        "top": "1 inch",
-        "bottom": "1 inch",
-        "left": "1 inch",
-        "right": "1 inch"
-    },
-    "page_orientation": "portrait"
-    }"""
+@mcp.prompt(title="Step-4 : Generate Proposal or Capability Statement")
+def Step4_generate_capability_statement() -> str:
+    return """
+You are BroadAxis-AI, an assistant trained to generate high-quality capability statements and proposal documents for RFP and RFQ responses.
+The user has either uploaded an opportunity document or requested a formal proposal. Use all available information from:
 
+- Uploaded documents (RFP/RFQ)
+- Internal knowledge (via Broadaxis_knowledge_search)
+- Prior summaries or analyses already provided
 
-@mcp.prompt(title="Code Review")
-def review_code(code: str) -> str:
-    """Review a piece of code"""
-    return f"Please review this code:\n\n{code}"
+---
 
+### 🧠 Instructions
 
-@mcp.prompt(title="Debug Assistant")
-def debug_error(error: str) -> list[base.Message]:
-    """Debug an error message"""
-    return [
-        base.UserMessage("I'm seeing this error:"),
-        base.UserMessage(error),
-        base.AssistantMessage("I'll help debug that. What have you tried so far?"),
-    ]
+- Do not invent names, projects, or facts.
+- Use Broadaxis_knowledge_search to populate all relevant content.
+- Leave placeholders where personal or business info is not available.
+- Maintain professional, confident, and compliant tone.
 
+If this proposal is meant to be saved, offer to generate a PDF or Word version using the appropriate tool.
 
-@mcp.prompt(title="Movie Actor Analysis")
-def analyze_actor(actor_name: str) -> str:
-    """Analyze a movie actor's career, top movies, and performance"""
-    return f"""Please provide a comprehensive analysis of the actor {actor_name}. Include the following information:
+"""
 
-1. **Actor Overview:**
-   - Brief biography and career highlights
-   - Years active in the industry
-   - Notable achievements and awards
-
-2. **Top 5 Highest Grossing Movies:**
-   - List their top 5 highest grossing films with box office numbers
-   - Brief description of their role in each movie
-   - Year of release for each film
-
-3. **Genre Analysis:**
-   - Primary genres they work in (Action, Drama, Comedy, etc.)
-   - Which genres they excel in most
-   - Any genre transitions throughout their career
-
-4. **Performance Strengths:**
-   - What makes them a compelling actor
-   - Signature acting style or techniques
-   - Most memorable performances
-
-5. **Areas for Improvement:**
-   - What could they have done better in their career
-   - Missed opportunities or poor role choices
-   - Suggestions for future career directions
-
-6. **Overall Assessment:**
-   - Current status in Hollywood
-   - Legacy and impact on cinema
-   - Comparison with peers in their generation
-
-Please provide detailed, factual information with specific examples and be objective in your analysis."""
 
 if __name__ == "__main__":
-    # Initialize and run the server
     import sys
     import logging
 
     # Set up logging for debugging
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
 
     try:
-        mcp.run(transport='stdio')
+        # Run the MCP server synchronously
+        mcp.run()
+    except KeyboardInterrupt:
+        print("Server stopped", file=sys.stderr)
     except Exception as e:
         print(f"Server error: {e}", file=sys.stderr)
         sys.exit(1)
